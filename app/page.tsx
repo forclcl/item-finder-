@@ -4,10 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 
 type Row = {
-  업체명: string;
   상품명: string;
-  입고수량: string;
-  유통기한: string;
   보관장: string;
 };
 
@@ -28,35 +25,17 @@ const pick = (obj: any, keys: string[]) => {
   return "";
 };
 
-const formatExpiry = (v: string) => {
-  const s = String(v ?? "").trim();
-  if (!s) return "-";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-
-  const n = Number(s);
-  if (!Number.isNaN(n) && n > 20000 && n < 90000) {
-    const d = XLSX.SSF.parse_date_code(n);
-    if (d) {
-      const yyyy = String(d.y).padStart(4, "0");
-      const mm = String(d.m).padStart(2, "0");
-      const dd = String(d.d).padStart(2, "0");
-      return `${yyyy}-${mm}-${dd}`;
-    }
-  }
-  return s;
-};
-
-const qtyLabel = (v: string) => {
-  const s = String(v ?? "").trim();
-  return s === "" ? "0" : s;
+const fallbackLocation = (v: unknown) => {
+  const s = toText(v);
+  return s ? s : "미지정";
 };
 
 export default function Page() {
   const [rows, setRows] = useState<Row[]>([]);
   const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<Row | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [message, setMessage] = useState("");
-  const [selected, setSelected] = useState<Row | null>(null);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -79,26 +58,23 @@ export default function Page() {
 
         const parsed: Row[] = (json ?? [])
           .map((r) => {
-            const 업체명 = toText(pick(r, ["업체명", "업체", "회사명", "제조사"]));
-            const 상품명 = toText(pick(r, ["상품명", "품명", "제품명", "상품"]));
-            const 입고수량 = toText(pick(r, ["입고수량", "입고예정수량", "수량", "입고"]));
-            const 유통기한 = toText(pick(r, ["유통기한", "유통", "기한", "소비기한"]));
-            const 보관장 = toText(pick(r, ["보관장", "보관위치", "위치", "로케이션", "진열"]));
-            return { 업체명, 상품명, 입고수량, 유통기한, 보관장 };
+            const 상품명 = toText(pick(r, ["상품명", "품명", "제품명", "상품", "Item", "Name"]));
+            const 보관장 = fallbackLocation(pick(r, ["보관장", "보관위치", "위치", "로케이션", "진열", "Location"]));
+            return { 상품명, 보관장 };
           })
-          .filter((r) => r.업체명 || r.상품명 || r.보관장);
+          .filter((r) => r.상품명); // 상품명 없는 행은 제거
 
         if (cancelled) return;
 
         setRows(parsed);
         setStatus("ready");
-        setMessage(`데이터 ${parsed.length}건 로딩 완료`);
+        setMessage(parsed.length ? `데이터 ${parsed.length}건 로딩 완료` : "데이터가 비어 있어요");
         setTimeout(() => inputRef.current?.focus(), 50);
       } catch (e) {
         if (cancelled) return;
         setRows([]);
         setStatus("error");
-        setMessage("자동 로딩 실패: public/data.xlsx 파일명/위치를 확인해 주세요.");
+        setMessage("자동 로딩 실패: public/data.xlsx 파일명/위치를 확인해 주세요. (파일명은 data.xlsx)");
       }
     }
 
@@ -111,35 +87,16 @@ export default function Page() {
   const filtered = useMemo(() => {
     if (!query) return [];
     const q = norm(query);
-    return rows
-      .filter((r) => norm(r.업체명).includes(q) || norm(r.상품명).includes(q))
-      .slice(0, 120);
+    return rows.filter((r) => norm(r.상품명).includes(q)).slice(0, 200);
   }, [rows, query]);
 
   return (
-    // ✅ 전역 CSS가 뭘 하든 무조건 진하게 보이도록 강제
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#fff",
-        color: "#000",
-        opacity: 1,
-        filter: "none",
-      }}
-    >
-      {/* 상단 */}
-      <div
-        style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 50,
-          background: "#fff",
-          borderBottom: "1px solid #e5e5e5",
-        }}
-      >
+    <div style={{ minHeight: "100vh", background: "#fff", color: "#000" }}>
+      {/* 상단 고정 */}
+      <div style={{ position: "sticky", top: 0, zIndex: 50, background: "#fff", borderBottom: "1px solid #e5e5e5" }}>
         <div style={{ maxWidth: 520, margin: "0 auto", padding: 14 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-            <div style={{ fontSize: 20, fontWeight: 900, color: "#000" }}>물품 보관장</div>
+            <div style={{ fontSize: 20, fontWeight: 900 }}>물품 보관장</div>
             <div style={{ fontSize: 12, color: "#333" }}>
               {status === "ready" ? `데이터 ${rows.length}건` : status === "loading" ? "로딩 중" : "오류"}
             </div>
@@ -154,7 +111,6 @@ export default function Page() {
               background: "#fafafa",
               fontSize: 13,
               color: status === "error" ? "#b42318" : "#111",
-              opacity: 1,
             }}
           >
             {message}
@@ -167,7 +123,7 @@ export default function Page() {
               setQuery(e.target.value);
               setSelected(null);
             }}
-            placeholder="업체명 또는 상품명 검색"
+            placeholder="상품명 검색"
             disabled={status !== "ready"}
             style={{
               marginTop: 10,
@@ -179,10 +135,46 @@ export default function Page() {
               outline: "none",
               color: "#000",
               background: "#fff",
-              opacity: 1,
-              WebkitTextFillColor: "#000",
             }}
           />
+
+          <div style={{ marginTop: 10, display: "flex", gap: 10 }}>
+            <button
+              type="button"
+              onClick={() => {
+                setQuery("");
+                setSelected(null);
+                setTimeout(() => inputRef.current?.focus(), 0);
+              }}
+              style={{
+                flex: 1,
+                padding: "12px 12px",
+                borderRadius: 14,
+                border: "1px solid #ddd",
+                fontWeight: 900,
+                background: "#fff",
+                color: "#000",
+              }}
+            >
+              검색 초기화
+            </button>
+
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              style={{
+                flex: 1,
+                padding: "12px 12px",
+                borderRadius: 14,
+                border: "1px solid #ddd",
+                fontWeight: 900,
+                background: "#fff",
+                color: "#000",
+              }}
+            >
+              데이터 다시 불러오기
+            </button>
+          </div>
         </div>
       </div>
 
@@ -195,21 +187,11 @@ export default function Page() {
         )}
 
         {status === "ready" && query && filtered.length === 0 && (
-          <div
-            style={{
-              padding: 14,
-              borderRadius: 14,
-              border: "2px dashed #999",
-              color: "#000",
-              fontSize: 14,
-              opacity: 1,
-            }}
-          >
+          <div style={{ padding: 14, borderRadius: 14, border: "2px dashed #999", color: "#000", fontSize: 14 }}>
             검색 결과가 없어요.
           </div>
         )}
 
-        {/* ✅ button 사용 금지(비활성/흐림 원인) → div로 변경 */}
         {filtered.map((r, i) => (
           <div
             key={i}
@@ -220,8 +202,6 @@ export default function Page() {
               if (e.key === "Enter" || e.key === " ") setSelected(r);
             }}
             style={{
-              width: "100%",
-              textAlign: "left",
               border: "2px solid #d0d0d0",
               borderRadius: 18,
               padding: 16,
@@ -229,29 +209,14 @@ export default function Page() {
               background: "#fff",
               cursor: "pointer",
               userSelect: "none",
-              opacity: 1,
-              filter: "none",
-              color: "#000",
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13, color: "#111", opacity: 1 }}>{r.업체명}</div>
-                <div
-                  style={{
-                    marginTop: 6,
-                    fontSize: 16,
-                    fontWeight: 900,
-                    lineHeight: 1.25,
-                    color: "#000",
-                    opacity: 1,
-                  }}
-                >
-                  {r.상품명}
-                </div>
+                <div style={{ fontSize: 16, fontWeight: 900, lineHeight: 1.25 }}>{r.상품명}</div>
+                <div style={{ marginTop: 8, fontSize: 13, color: "#333" }}>보관장</div>
               </div>
 
-              {/* 보관장 크게 */}
               <div
                 style={{
                   flex: "0 0 auto",
@@ -261,23 +226,11 @@ export default function Page() {
                   borderRadius: 16,
                   border: "3px solid #000",
                   lineHeight: 1,
-                  color: "#000",
                   background: "#fff",
-                  opacity: 1,
-                  WebkitTextFillColor: "#000",
                 }}
               >
-                {r.보관장 || "-"}
+                {r.보관장}
               </div>
-            </div>
-
-            <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <span style={{ fontWeight: 1000, color: "#000", opacity: 1 }}>
-                입고 {qtyLabel(r.입고수량)}
-              </span>
-              <span style={{ fontWeight: 1000, color: "#000", opacity: 1 }}>
-                유통 {formatExpiry(r.유통기한)}
-              </span>
             </div>
           </div>
         ))}
@@ -306,37 +259,32 @@ export default function Page() {
               maxWidth: 520,
               padding: 18,
               color: "#000",
-              opacity: 1,
             }}
           >
             <div style={{ fontSize: 14, color: "#111" }}>보관장</div>
             <div style={{ fontSize: 72, fontWeight: 1000, margin: "8px 0 12px", color: "#000" }}>
-              {selected.보관장 || "-"}
+              {selected.보관장}
             </div>
 
             <div style={{ fontSize: 14, lineHeight: 1.7, color: "#000", fontWeight: 800 }}>
-              <div>업체명: {selected.업체명}</div>
               <div>상품명: {selected.상품명}</div>
-              <div>입고수량: {qtyLabel(selected.입고수량)}</div>
-              <div>유통기한: {formatExpiry(selected.유통기한)}</div>
             </div>
 
-            <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-              <button
-                onClick={() => setSelected(null)}
-                style={{
-                  width: "100%",
-                  padding: 12,
-                  borderRadius: 14,
-                  border: "2px solid #000",
-                  fontWeight: 1000,
-                  background: "#fff",
-                  color: "#000",
-                }}
-              >
-                닫기
-              </button>
-            </div>
+            <button
+              onClick={() => setSelected(null)}
+              style={{
+                marginTop: 16,
+                width: "100%",
+                padding: 12,
+                borderRadius: 14,
+                border: "2px solid #000",
+                fontWeight: 1000,
+                background: "#fff",
+                color: "#000",
+              }}
+            >
+              닫기
+            </button>
           </div>
         </div>
       )}
